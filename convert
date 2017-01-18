@@ -10,6 +10,7 @@ var chalk = require('chalk');
 var path = require('path');
 var fs = require('fs');
 var Ffmpeg = require('fluent-ffmpeg');
+var ProgressBar = require('ascii-progress');
 
 var inputIsDir = false;
 var inputIsFile = false;
@@ -25,7 +26,6 @@ function parseBool(str) {
 }
 
 function parseBitrate(number) {
-  console.log(number);
   return parseInt(number);
 }
 
@@ -33,7 +33,7 @@ program
   .version('0.0.1')
   .usage('[options] <keywords>')
   .option('-i, --input [path]', 'Input file or directory', parsePath)
-  .option('-o, --output [path]', 'Output directory', parsePath)
+  .option('-o, --output [directory]', 'Output directory', parsePath)
   .option('-w, --width [pixel width]', 'Output file width (defaults to input width)', '?')
   .option('-h, --height [integer]', 'Output file height (defaults to input height)', '?')
   .option('-b, --bitrate [integer]', 'Bitrate (in Kbps)', parseBitrate, 1000)
@@ -51,9 +51,10 @@ if (program.input === program.output) {
   return;
 }
 
+
+
 // make output directory if it doesn't exist
 if (!fs.existsSync(program.output)) {
-  console.log(program.output);
   fs.mkdirSync(program.output);
 }
 
@@ -70,8 +71,6 @@ var args = defaults(program.args, {
   audioBitrate: program.audiobitrate,
   videoBitrate: program.bitrate
 });
-
-console.log(args);
 
 var ffmpeg = new Ffmpeg();
 function addInput(input, output) {
@@ -108,20 +107,35 @@ function addInput(input, output) {
   if (args.width !== '?' || args.height !== '?') {
     ffmpeg.size(args.width + 'x' + args.height);
   }
+
 }
 
 if (inputIsFile) {
   addInput(args.input, args.output);
 }
 
-function printProgress(progress) {
-  console.log(progress);
-  // process.stdout.write(progress.percent+'% Done');
-  // process.stdout.clearLine();
-  // process.stdout.cursorTo(0);
-  // process.stdout.write("\n");
+function parseTimeMark(timemark) {
+  var arr = timemark.split(':');
+  var seconds = (parseInt(arr[0] * 60 * 60)) + parseInt((arr[1] * 60)) + parseFloat(arr[2]);
+  return seconds;
 }
 
-ffmpeg
-  .on('progress', printProgress)
-  .run();
+ffmpeg.ffprobe(function(err, data) {
+  var duration = data.format.duration;
+  var bar = new ProgressBar({
+    schema: '[:bar.green] :percent.green.bold Processing at :fps',
+    blank: '*'
+  });
+  function printComplete() {
+    bar.update(1, { fps: '0fps' });
+  }
+  function printProgress(progress) {
+    var timemark = parseTimeMark(progress.timemark);
+    bar.update(timemark / duration, { fps: progress.currentFps +'fps' });
+  }
+
+  ffmpeg
+    .on('progress', printProgress)
+    .on('end', printComplete)
+    .run();
+})
